@@ -17,6 +17,7 @@ import {
 
 const CLAN_NAME = "Aussie Mob";
 const CLAN_REFRESH_INTERVAL = 300_000;
+const MAX_CLAN_MEMBERS = 500;
 const RUNEMETRICS_PROFILE_LIMIT = 8;
 const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
 const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
@@ -34,7 +35,7 @@ function rankOrderIndex(rank: string) {
 }
 
 const communityNotes = [
-  "Clan roster values come from RuneScape clan hiscores: clanmate, clan rank, total XP, and kills.",
+  `The member table loads the full public RuneScape clan roster, capped at the clan maximum of ${MAX_CLAN_MEMBERS} members.`,
   "RuneMetrics enrichment is limited to the top members to avoid excessive player profile requests.",
   "Both clan hiscores and RuneMetrics refresh every 300 seconds; neither source offers true push realtime updates.",
 ];
@@ -103,7 +104,8 @@ function parseClanMembers(text: string): ClanMember[] {
         kills: Number(kills ?? 0),
       };
     })
-    .filter((member) => member.name !== "Unknown");
+    .filter((member) => member.name !== "Unknown")
+    .slice(0, MAX_CLAN_MEMBERS);
 }
 
 async function fetchText(url: string) {
@@ -307,8 +309,9 @@ const Index = () => {
   });
 
   const hasLiveMembers = Boolean(data?.members.length);
-  const members = hasLiveMembers ? data!.members : fallbackMembers;
+  const members = (hasLiveMembers ? data!.members : fallbackMembers).slice(0, MAX_CLAN_MEMBERS);
   const memberCount = members.length;
+  const isFullClanList = hasLiveMembers && memberCount >= MAX_CLAN_MEMBERS;
   const totalXp = members.reduce((sum, member) => sum + member.totalXp, 0);
   const totalKills = members.reduce((sum, member) => sum + member.kills, 0);
   const sortedByXp = [...members].sort((a, b) => b.totalXp - a.totalXp);
@@ -398,8 +401,8 @@ const Index = () => {
                   Aussie Mob
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-                  A RunePixels-inspired clan hub for Aussie Mob using the actual public clan roster values: clanmate,
-                  rank, total XP, and kills. No estimated skilling or event totals are mixed in.
+                  A RunePixels-inspired clan hub for Aussie Mob using the full public clan roster, up to RuneScape’s
+                  {" "}{MAX_CLAN_MEMBERS}-member clan cap. Every row uses actual clanmate, rank, total XP, and kill values.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <a
@@ -429,7 +432,7 @@ const Index = () => {
               <p className="text-xs leading-5 text-slate-500">
                 {error
                   ? "Live data could not be reached, so the page is clearly marked as using the cached snapshot."
-                  : `Showing ${formatNumber(memberCount)} members from ${sourceLabel}. The roster refreshes automatically every 300 seconds.`}
+                  : `Showing ${formatNumber(memberCount)} members from ${sourceLabel}${isFullClanList ? " — full 500-member clan cap loaded" : ""}. The roster refreshes automatically every 300 seconds.`}
               </p>
             </div>
           </Panel>
@@ -437,7 +440,7 @@ const Index = () => {
 
         <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            [Users, "Members", formatNumber(memberCount), `${sourceLabel} roster`],
+            [Users, "Members", formatNumber(memberCount), isFullClanList ? "Full clan cap loaded" : `${sourceLabel} roster`],
             [Zap, "Total XP", formatNumber(totalXp), "Exact combined roster XP"],
             [Swords, "Kills", formatNumber(totalKills), "Exact public hiscore kills"],
             [Crown, "Top Player", topMember?.name ?? "Loading", topMember ? `${formatNumber(topMember.totalXp)} XP` : "--"],
@@ -475,15 +478,17 @@ const Index = () => {
                 ))}
               </div>
               <p className="mt-4 text-xs leading-5 text-slate-500">
-                The main table remains exact clan hiscores data. RuneMetrics is queried separately for the top {RUNEMETRICS_PROFILE_LIMIT} XP members only,
-                adding player profile details when Jagex exposes them.
+                The main table below is the full clan member list returned by RuneScape, capped at {MAX_CLAN_MEMBERS} members.
+                RuneMetrics is still queried separately for only the top {RUNEMETRICS_PROFILE_LIMIT} XP members.
               </p>
             </Panel>
 
             <Panel className="p-5">
-              <SectionTitle right={`${formatNumber(visibleMembers.length)} of ${formatNumber(memberCount)} members`}>Clan Hiscores</SectionTitle>
+              <SectionTitle right={`${formatNumber(visibleMembers.length)} of ${formatNumber(memberCount)} members`}>Full Clan Member List</SectionTitle>
               <div className="mt-4 rounded-2xl bg-[var(--am-header)] p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Roster totals</p>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                  {isFullClanList ? "Full 500-member roster loaded" : "Roster totals"}
+                </p>
                 <p className="mt-1 text-sm text-slate-400">
                   Exact combined XP: <strong className="text-emerald-400">{formatNumber(totalXp)}</strong> · Exact tracked kills:{" "}
                   <strong className="text-emerald-400">{formatNumber(totalKills)}</strong>
