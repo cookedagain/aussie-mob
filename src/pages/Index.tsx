@@ -68,7 +68,12 @@ type ClanMember = {
 type ClanData = {
   members: ClanMember[];
   fetchedAt: string;
-  source: "RuneScape" | "CORS proxy";
+  source: string;
+};
+
+type ClanDataSource = {
+  label: string;
+  url: string;
 };
 
 type RuneMetricsActivity = {
@@ -104,34 +109,62 @@ function parseClanMembers(text: string): ClanMember[] {
         kills: Number(kills ?? 0),
       };
     })
-    .filter((member) => member.name !== "Unknown")
+    .filter((member) => member.name !== "Unknown" && Number.isFinite(member.totalXp) && Number.isFinite(member.kills))
     .slice(0, MAX_CLAN_MEMBERS);
 }
 
-async function fetchText(url: string) {
-  const response = await fetch(url, { headers: { Accept: "text/plain" } });
+function clanDataSources(): ClanDataSource[] {
+  return [
+    { label: "RuneScape", url: CLAN_HISCORES_URL },
+    { label: "CorsProxy", url: `https://corsproxy.io/?url=${encodeURIComponent(CLAN_HISCORES_URL)}` },
+    { label: "AllOrigins", url: CLAN_PROXY_URL },
+  ];
+}
 
-  if (!response.ok) {
-    throw new Error("Unable to load Aussie Mob clan data");
+async function fetchText(url: string, timeoutMs = 7000) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "text/plain" },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to load Aussie Mob clan data");
+    }
+
+    return await response.text();
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function parseAndValidateClanText(text: string) {
+  const members = parseClanMembers(text);
+
+  if (members.length <= fallbackMembers.length) {
+    throw new Error("Clan response did not contain the full Aussie Mob roster");
   }
 
-  return response.text();
+  return members;
 }
 
 async function fetchClanData(): Promise<ClanData> {
-  try {
-    return {
-      members: parseClanMembers(await fetchText(CLAN_HISCORES_URL)),
-      fetchedAt: new Date().toISOString(),
-      source: "RuneScape",
-    };
-  } catch {
-    return {
-      members: parseClanMembers(await fetchText(CLAN_PROXY_URL)),
-      fetchedAt: new Date().toISOString(),
-      source: "CORS proxy",
-    };
+  for (const source of clanDataSources()) {
+    try {
+      return {
+        members: parseAndValidateClanText(await fetchText(source.url)),
+        fetchedAt: new Date().toISOString(),
+        source: source.label,
+      };
+    } catch {
+      // Try the next browser-accessible source.
+    }
   }
+
+  throw new Error("Unable to load the full Aussie Mob roster from RuneScape or the configured CORS proxies");
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -306,10 +339,11 @@ const Index = () => {
     queryFn: fetchClanData,
     refetchInterval: CLAN_REFRESH_INTERVAL,
     staleTime: CLAN_REFRESH_INTERVAL,
+    retry: 1,
   });
 
   const hasLiveMembers = Boolean(data?.members.length);
-  const members = (hasLiveMembers ? data!.members : fallbackMembers).slice(0, MAX_CLAN_MEMBERS);
+  const members = (hasLiveMembers ? data!.members : []).slice(0, MAX_CLAN_MEMBERS);
   const memberCount = members.length;
   const isFullClanList = hasLiveMembers && memberCount >= MAX_CLAN_MEMBERS;
   const totalXp = members.reduce((sum, member) => sum + member.totalXp, 0);
@@ -345,7 +379,7 @@ const Index = () => {
   );
   const updatedAt = dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : data?.fetchedAt;
   const updateLabel = updatedAt ? formatUpdatedTime(updatedAt) : "loading live data";
-  const sourceLabel = hasLiveMembers ? data?.source ?? "RuneScape" : "cached partial snapshot";
+  const sourceLabel = hasLiveMembers ? data?.source ?? "RuneScape" : "live roster unavailable";
 
   return (
     <main className="min-h-screen bg-[var(--am-bg)] text-slate-300 selection:bg-[var(--am-gold)] selection:text-[var(--am-bg)]">
@@ -431,7 +465,7 @@ const Index = () => {
               </div>
               <p className="text-xs leading-5 text-slate-500">
                 {error
-                  ? "Live data could not be reached, so the page is clearly marked as using the cached snapshot."
+                  ? "Live data could not be reached from RuneScape or the configured CORS proxies, so the roster is not showing stale partial data."
                   : `Showing ${formatNumber(memberCount)} members from ${sourceLabel}${isFullClanList ? " — full 500-member clan cap loaded" : ""}. The roster refreshes automatically every 300 seconds.`}
               </p>
             </div>
@@ -494,7 +528,13 @@ const Index = () => {
                   <strong className="text-emerald-400">{formatNumber(totalKills)}</strong>
                 </p>
               </div>
-              <HiscoreTable members={visibleMembers} />
+              {visibleMembers.length > 0 ? (
+                <HiscoreTable members={visibleMembers} />
+              ) : (
+                <div className="mt-4 rounded-2xl border border-[var(--am-border)] bg-[var(--am-header)] p-5 text-sm leading-6 text-slate-400">
+                  The live roster is currently blocked by CORS or a proxy timeout. I’m no longer showing the old 15-member snapshot as if it were the full clan.
+                </div>
+              )}
             </Panel>
           </div>
 
