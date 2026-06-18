@@ -4,6 +4,18 @@
 
 @layer base {
   :root {
+    --am-bg: #05080b;
+    --am-header: #0c1117;
+    --am-panel: #121820;
+    --am-panel-soft: #1a222b;
+    --am-line: #202832;
+    --am-border: #303844;
+    --am-gold: #d8ab4f;
+    --am-gold-bright: #dfbd73;
+    --am-gold-dim: #8d6627;
+    --am-brown: #2a2012;
+    --am-brown-light: #3a2b17;
+
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
 
