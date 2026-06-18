@@ -17,11 +17,15 @@ import {
 
 const CLAN_NAME = "Aussie Mob";
 const CLAN_REFRESH_INTERVAL = 300_000;
+const RUNEMETRICS_PROFILE_LIMIT = 8;
 const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
 const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
+const RUNEMETRICS_PROFILE_BASE_URL = "https://apps.runescape.com/runemetrics/profile/profile";
 
 const navItems = ["Home", "Players", "Clans", "Drops", "Skill Hub", "Minigame Hub"];
 const availableFields = ["Clanmate", "Clan Rank", "Total XP", "Kills"];
+const runeMetricsFields = ["Combat Level", "Total Level", "Quest Counts", "Recent Activity"];
+const combinedFields = [...availableFields, ...runeMetricsFields];
 const rankOrder = ["Owner", "Deputy Owner", "Overseer", "Coordinator", "Organiser", "Admin", "General", "Captain", "Lieutenant", "Sergeant", "Corporal", "Recruit"];
 
 function rankOrderIndex(rank: string) {
@@ -30,9 +34,9 @@ function rankOrderIndex(rank: string) {
 }
 
 const communityNotes = [
-  "Only public RuneScape clan hiscores values are shown: clanmate, clan rank, total XP, and kills.",
-  "Live roster data refreshes every 300 seconds and uses exact XP and kill totals in the member table.",
-  "RunePixels is used as the layout reference; values come from the RuneScape Aussie Mob clan feed.",
+  "Clan roster values come from RuneScape clan hiscores: clanmate, clan rank, total XP, and kills.",
+  "RuneMetrics enrichment is limited to the top members to avoid excessive player profile requests.",
+  "Both clan hiscores and RuneMetrics refresh every 300 seconds; neither source offers true push realtime updates.",
 ];
 
 const fallbackMembers: ClanMember[] = [
@@ -64,6 +68,23 @@ type ClanData = {
   members: ClanMember[];
   fetchedAt: string;
   source: "RuneScape" | "CORS proxy";
+};
+
+type RuneMetricsActivity = {
+  date?: string;
+  details?: string;
+  text?: string;
+};
+
+type RuneMetricsProfile = {
+  name: string;
+  combatlevel?: number;
+  totalskill?: number;
+  totalxp?: number;
+  questscomplete?: number;
+  questsstarted?: number;
+  questsnotstarted?: number;
+  activities?: RuneMetricsActivity[];
 };
 
 function parseClanMembers(text: string): ClanMember[] {
@@ -109,6 +130,39 @@ async function fetchClanData(): Promise<ClanData> {
       source: "CORS proxy",
     };
   }
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+
+  if (!response.ok) {
+    throw new Error("Unable to load RuneMetrics profile data");
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function runeMetricsUrl(name: string) {
+  return `${RUNEMETRICS_PROFILE_BASE_URL}?user=${encodeURIComponent(name)}&activities=5`;
+}
+
+async function fetchRuneMetricsProfile(name: string): Promise<RuneMetricsProfile | null> {
+  const directUrl = runeMetricsUrl(name);
+
+  try {
+    return await fetchJson<RuneMetricsProfile>(directUrl);
+  } catch {
+    try {
+      return await fetchJson<RuneMetricsProfile>(`https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function fetchRuneMetricsProfiles(members: ClanMember[]) {
+  const results = await Promise.all(members.map((member) => fetchRuneMetricsProfile(member.name)));
+  return results.filter((profile): profile is RuneMetricsProfile => Boolean(profile?.name));
 }
 
 function formatNumber(value: number) {
@@ -165,6 +219,47 @@ function PlayerAvatar({ name }: { name: string }) {
   );
 }
 
+function RuneMetricsCard({ profile }: { profile: RuneMetricsProfile }) {
+  const latestActivity = profile.activities?.[0];
+
+  return (
+    <a
+      href={`https://runepixels.com/players/${playerSlug(profile.name)}`}
+      target="_blank"
+      rel="noreferrer"
+      className="block rounded-2xl bg-[var(--am-header)] p-3 transition hover:bg-[var(--am-panel-soft)]"
+    >
+      <div className="flex items-center gap-3">
+        <PlayerAvatar name={profile.name} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-black text-slate-100">{profile.name}</p>
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">RuneMetrics profile</p>
+        </div>
+        <ExternalLink className="h-3 w-3 text-slate-600" />
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-xl bg-[var(--am-bg)] p-2">
+          <p className="text-[9px] uppercase tracking-[0.12em] text-slate-600">Combat</p>
+          <p className="font-black text-[var(--am-gold-bright)]">{profile.combatlevel ?? "--"}</p>
+        </div>
+        <div className="rounded-xl bg-[var(--am-bg)] p-2">
+          <p className="text-[9px] uppercase tracking-[0.12em] text-slate-600">Total</p>
+          <p className="font-black text-[var(--am-gold-bright)]">{profile.totalskill ?? "--"}</p>
+        </div>
+        <div className="rounded-xl bg-[var(--am-bg)] p-2">
+          <p className="text-[9px] uppercase tracking-[0.12em] text-slate-600">Quests</p>
+          <p className="font-black text-[var(--am-gold-bright)]">{profile.questscomplete ?? "--"}</p>
+        </div>
+      </div>
+      {latestActivity && (
+        <p className="mt-3 line-clamp-2 text-[11px] leading-5 text-slate-500">
+          {latestActivity.text || latestActivity.details || "Recent activity available"}
+        </p>
+      )}
+    </a>
+  );
+}
+
 function HiscoreTable({ members }: { members: ClanMember[] }) {
   return (
     <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--am-border)] bg-[var(--am-header)]">
@@ -217,6 +312,19 @@ const Index = () => {
   const totalXp = members.reduce((sum, member) => sum + member.totalXp, 0);
   const totalKills = members.reduce((sum, member) => sum + member.kills, 0);
   const sortedByXp = [...members].sort((a, b) => b.totalXp - a.totalXp);
+  const runeMetricsTargets = sortedByXp.slice(0, RUNEMETRICS_PROFILE_LIMIT);
+  const runeMetricsNames = runeMetricsTargets.map((member) => member.name).join("|");
+  const {
+    data: runeMetricsProfiles = [],
+    error: runeMetricsError,
+    isFetching: isFetchingRuneMetrics,
+  } = useQuery({
+    queryKey: ["runemetrics-profiles", runeMetricsNames],
+    queryFn: () => fetchRuneMetricsProfiles(runeMetricsTargets),
+    enabled: runeMetricsTargets.length > 0,
+    refetchInterval: CLAN_REFRESH_INTERVAL,
+    staleTime: CLAN_REFRESH_INTERVAL,
+  });
   const visibleMembers = sortedByXp.filter((member) =>
     `${member.name} ${member.rank}`.toLowerCase().includes(searchTerm.trim().toLowerCase()),
   );
@@ -357,16 +465,18 @@ const Index = () => {
             <Panel className="p-5">
               <SectionTitle right="Accurate public fields">Available Clan Values</SectionTitle>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                {availableFields.map((field) => (
+                {combinedFields.map((field) => (
                   <div key={field} className="rounded-2xl border border-[var(--am-border)] bg-[var(--am-header)] p-4">
-                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Field</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                      {availableFields.includes(field) ? "Clan feed" : "RuneMetrics"}
+                    </p>
                     <p className="mt-1 font-black text-slate-100">{field}</p>
                   </div>
                 ))}
               </div>
               <p className="mt-4 text-xs leading-5 text-slate-500">
-                I removed the fake RunePixels-style period/skill filters because the RuneScape clan endpoint does not provide
-                daily XP, weekly XP, skill breakdowns, or account modes for clan members. The table below uses exact live values.
+                The main table remains exact clan hiscores data. RuneMetrics is queried separately for the top {RUNEMETRICS_PROFILE_LIMIT} XP members only,
+                adding player profile details when Jagex exposes them.
               </p>
             </Panel>
 
@@ -393,6 +503,21 @@ const Index = () => {
                     <p className="text-xs leading-5 text-slate-400">{note}</p>
                   </div>
                 ))}
+              </div>
+            </Panel>
+
+            <Panel className="p-5">
+              <SectionTitle right={isFetchingRuneMetrics ? "Refreshing" : `${runeMetricsProfiles.length}/${RUNEMETRICS_PROFILE_LIMIT} loaded`}>RuneMetrics Profiles</SectionTitle>
+              <div className="mt-3 space-y-2">
+                {runeMetricsProfiles.length > 0 ? (
+                  runeMetricsProfiles.map((profile) => <RuneMetricsCard key={profile.name} profile={profile} />)
+                ) : (
+                  <div className="rounded-2xl bg-[var(--am-header)] p-3 text-xs leading-5 text-slate-500">
+                    {runeMetricsError
+                      ? "RuneMetrics profiles could not be reached right now. Clan hiscores are still available."
+                      : "Loading RuneMetrics details for the top XP members..."}
+                  </div>
+                )}
               </div>
             </Panel>
 
