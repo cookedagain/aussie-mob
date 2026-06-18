@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
@@ -16,48 +17,22 @@ import {
 
 const CLAN_NAME = "Aussie Mob";
 const CLAN_REFRESH_INTERVAL = 300_000;
+const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
+const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
 
 const navItems = ["Home", "Players", "Clans", "Drops", "Skill Hub", "Minigame Hub"];
-const trackerTabs = ["XP", "Double XP"];
-const modeTabs = ["All", "Mains", "Ironman", "Hardcore", "Group Ironman"];
-const periodTabs = ["Today", "Week", "Month"];
-const skillIcons = [
-  "Overall",
-  "Attack",
-  "Defence",
-  "Strength",
-  "Constitution",
-  "Ranged",
-  "Prayer",
-  "Magic",
-  "Cooking",
-  "Woodcutting",
-  "Fletching",
-  "Fishing",
-  "Firemaking",
-  "Crafting",
-  "Smithing",
-  "Mining",
-  "Herblore",
-  "Agility",
-  "Thieving",
-  "Slayer",
-  "Farming",
-  "Runecrafting",
-  "Hunter",
-  "Construction",
-  "Summoning",
-  "Dungeoneering",
-  "Divination",
-  "Invention",
-  "Archaeology",
-  "Necromancy",
-];
+const availableFields = ["Clanmate", "Clan Rank", "Total XP", "Kills"];
+const rankOrder = ["Owner", "Deputy Owner", "Overseer", "Coordinator", "Organiser", "Admin", "General", "Captain", "Lieutenant", "Sergeant", "Corporal", "Recruit"];
+
+function rankOrderIndex(rank: string) {
+  const index = rankOrder.indexOf(rank);
+  return index === -1 ? rankOrder.length : index;
+}
 
 const communityNotes = [
-  "More than a clan, a community — Aussie banter, PvM help, skilling, and learner-friendly events.",
-  "Tracker refresh: every 300 seconds. RunePixels competitions reference: every 15 minutes.",
-  "Reset reference: day 5 a.m GMT, week Sunday 5 a.m GMT, month on the 1st at 5 a.m GMT.",
+  "Only public RuneScape clan hiscores values are shown: clanmate, clan rank, total XP, and kills.",
+  "Live roster data refreshes every 300 seconds and uses exact XP and kill totals in the member table.",
+  "RunePixels is used as the layout reference; values come from the RuneScape Aussie Mob clan feed.",
 ];
 
 const fallbackMembers: ClanMember[] = [
@@ -88,6 +63,7 @@ type ClanMember = {
 type ClanData = {
   members: ClanMember[];
   fetchedAt: string;
+  source: "RuneScape" | "CORS proxy";
 };
 
 function parseClanMembers(text: string): ClanMember[] {
@@ -109,31 +85,34 @@ function parseClanMembers(text: string): ClanMember[] {
     .filter((member) => member.name !== "Unknown");
 }
 
-async function fetchClanData(): Promise<ClanData> {
-  const response = await fetch(
-    `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`,
-    { headers: { Accept: "text/plain" } },
-  );
+async function fetchText(url: string) {
+  const response = await fetch(url, { headers: { Accept: "text/plain" } });
 
   if (!response.ok) {
-    throw new Error("Unable to load RuneScape clan data");
+    throw new Error("Unable to load Aussie Mob clan data");
   }
 
-  return {
-    members: parseClanMembers(await response.text()),
-    fetchedAt: new Date().toISOString(),
-  };
+  return response.text();
+}
+
+async function fetchClanData(): Promise<ClanData> {
+  try {
+    return {
+      members: parseClanMembers(await fetchText(CLAN_HISCORES_URL)),
+      fetchedAt: new Date().toISOString(),
+      source: "RuneScape",
+    };
+  } catch {
+    return {
+      members: parseClanMembers(await fetchText(CLAN_PROXY_URL)),
+      fetchedAt: new Date().toISOString(),
+      source: "CORS proxy",
+    };
+  }
 }
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-AU").format(value);
-}
-
-function formatShort(value: number) {
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(value);
 }
 
 function formatUpdatedTime(value: string) {
@@ -175,25 +154,6 @@ function LogoMark({ size = "large" }: { size?: "small" | "large" }) {
   );
 }
 
-function PillRow({ items, active = 0 }: { items: string[]; active?: number }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {items.map((item, index) => (
-        <button
-          key={item}
-          className={`rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] transition ${
-            index === active
-              ? "border-[var(--am-gold-dim)] bg-[var(--am-gold)] text-[var(--am-bg)]"
-              : "border-[var(--am-border)] bg-[var(--am-header)] text-slate-500 hover:text-slate-200"
-          }`}
-        >
-          {item}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function PlayerAvatar({ name }: { name: string }) {
   return (
     <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-[var(--am-panel-soft)] ring-1 ring-[var(--am-border)]">
@@ -208,21 +168,21 @@ function PlayerAvatar({ name }: { name: string }) {
 function HiscoreTable({ members }: { members: ClanMember[] }) {
   return (
     <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--am-border)] bg-[var(--am-header)]">
-      <div className="grid grid-cols-[48px_1fr_92px] gap-2 border-b border-[var(--am-line)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 sm:grid-cols-[58px_1.4fr_130px_130px_88px]">
+      <div className="grid grid-cols-[44px_minmax(0,1fr)_104px] gap-2 border-b border-[var(--am-line)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 sm:grid-cols-[58px_1.4fr_140px_150px_88px]">
         <span>#</span>
-        <span>Name</span>
+        <span>Clanmate</span>
         <span className="hidden sm:block">Rank</span>
-        <span className="text-right">XP</span>
+        <span className="text-right">Total XP</span>
         <span className="hidden text-right sm:block">Kills</span>
       </div>
-      <div className="max-h-[610px] overflow-y-auto">
+      <div className="max-h-[650px] overflow-y-auto">
         {members.map((member, index) => (
           <a
             key={`${member.name}-${member.rank}`}
             href={`https://runepixels.com/players/${playerSlug(member.name)}`}
             target="_blank"
             rel="noreferrer"
-            className="grid grid-cols-[48px_1fr_92px] items-center gap-2 border-b border-[var(--am-line)] px-3 py-2 text-xs transition last:border-0 hover:bg-[var(--am-panel-soft)] sm:grid-cols-[58px_1.4fr_130px_130px_88px]"
+            className="grid grid-cols-[44px_minmax(0,1fr)_104px] items-center gap-2 border-b border-[var(--am-line)] px-3 py-2 text-xs transition last:border-0 hover:bg-[var(--am-panel-soft)] sm:grid-cols-[58px_1.4fr_140px_150px_88px]"
           >
             <span className="font-black text-slate-500">{index + 1}</span>
             <span className="flex min-w-0 items-center gap-3">
@@ -233,7 +193,7 @@ function HiscoreTable({ members }: { members: ClanMember[] }) {
               </span>
             </span>
             <span className="hidden truncate text-[var(--am-gold-bright)] sm:block">{member.rank}</span>
-            <span className="text-right font-black text-emerald-400">{formatShort(member.totalXp)}</span>
+            <span className="text-right font-black text-emerald-400">{formatNumber(member.totalXp)}</span>
             <span className="hidden text-right font-semibold text-slate-400 sm:block">{formatNumber(member.kills)}</span>
           </a>
         ))}
@@ -243,6 +203,7 @@ function HiscoreTable({ members }: { members: ClanMember[] }) {
 }
 
 const Index = () => {
+  const [searchTerm, setSearchTerm] = useState("");
   const { data, dataUpdatedAt, error, isFetching } = useQuery({
     queryKey: ["clan-data", CLAN_NAME],
     queryFn: fetchClanData,
@@ -250,11 +211,15 @@ const Index = () => {
     staleTime: CLAN_REFRESH_INTERVAL,
   });
 
-  const members = data?.members.length ? data.members : fallbackMembers;
-  const liveMemberCount = data?.members.length ?? members.length;
+  const hasLiveMembers = Boolean(data?.members.length);
+  const members = hasLiveMembers ? data!.members : fallbackMembers;
+  const memberCount = members.length;
   const totalXp = members.reduce((sum, member) => sum + member.totalXp, 0);
   const totalKills = members.reduce((sum, member) => sum + member.kills, 0);
   const sortedByXp = [...members].sort((a, b) => b.totalXp - a.totalXp);
+  const visibleMembers = sortedByXp.filter((member) =>
+    `${member.name} ${member.rank}`.toLowerCase().includes(searchTerm.trim().toLowerCase()),
+  );
   const sortedByKills = [...members].sort((a, b) => b.kills - a.kills || b.totalXp - a.totalXp);
   const topMember = sortedByXp[0];
   const leaders = members
@@ -264,8 +229,12 @@ const Index = () => {
     counts[member.rank] = (counts[member.rank] ?? 0) + 1;
     return counts;
   }, {});
+  const rankSummary = Object.entries(rankCounts).sort(
+    ([rankA], [rankB]) => rankOrderIndex(rankA) - rankOrderIndex(rankB),
+  );
   const updatedAt = dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : data?.fetchedAt;
   const updateLabel = updatedAt ? formatUpdatedTime(updatedAt) : "loading live data";
+  const sourceLabel = hasLiveMembers ? data?.source ?? "RuneScape" : "cached partial snapshot";
 
   return (
     <main className="min-h-screen bg-[var(--am-bg)] text-slate-300 selection:bg-[var(--am-gold)] selection:text-[var(--am-bg)]">
@@ -294,10 +263,15 @@ const Index = () => {
           </nav>
 
           <div className="flex items-center gap-2">
-            <div className="hidden h-9 items-center rounded-full border border-[var(--am-border)] bg-[var(--am-bg)] px-3 lg:flex">
+            <label className="hidden h-9 items-center rounded-full border border-[var(--am-border)] bg-[var(--am-bg)] px-3 lg:flex">
               <Search className="mr-2 h-3.5 w-3.5 text-slate-600" />
-              <span className="w-32 text-[11px] text-slate-600">Search player...</span>
-            </div>
+              <input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search members..."
+                className="w-36 bg-transparent text-[11px] text-slate-300 outline-none placeholder:text-slate-600"
+              />
+            </label>
             <button className="inline-flex h-9 items-center gap-1 rounded-full border border-[var(--am-gold-dim)] bg-[var(--am-brown)] px-4 text-[10px] font-black uppercase tracking-[0.12em] text-[var(--am-gold-bright)] hover:bg-[var(--am-brown-light)]">
               <LogIn className="h-3.5 w-3.5" /> Login
             </button>
@@ -316,8 +290,8 @@ const Index = () => {
                   Aussie Mob
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-                  A RunePixels-inspired clan hub for Aussie Mob, focused on live hiscores, clean tables, fast filters,
-                  and compact RuneScape tracker stats.
+                  A RunePixels-inspired clan hub for Aussie Mob using the actual public clan roster values: clanmate,
+                  rank, total XP, and kills. No estimated skilling or event totals are mixed in.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <a
@@ -346,8 +320,8 @@ const Index = () => {
               </div>
               <p className="text-xs leading-5 text-slate-500">
                 {error
-                  ? "RuneScape live data could not be reached, so the page is showing cached Aussie Mob launch data."
-                  : "Live member data is pulled from RuneScape public clan hiscores and refreshed automatically."}
+                  ? "Live data could not be reached, so the page is clearly marked as using the cached snapshot."
+                  : `Showing ${formatNumber(memberCount)} members from ${sourceLabel}. The roster refreshes automatically every 300 seconds.`}
               </p>
             </div>
           </Panel>
@@ -355,10 +329,10 @@ const Index = () => {
 
         <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            [Users, "Members", formatNumber(liveMemberCount), "Public clan roster"],
-            [Zap, "Total XP", formatShort(totalXp), "Combined member XP"],
-            [Swords, "Boss Kills", formatNumber(totalKills), "Tracked hiscore kills"],
-            [Crown, "Top Player", topMember?.name ?? "Loading", topMember ? formatShort(topMember.totalXp) : "--"],
+            [Users, "Members", formatNumber(memberCount), `${sourceLabel} roster`],
+            [Zap, "Total XP", formatNumber(totalXp), "Exact combined roster XP"],
+            [Swords, "Kills", formatNumber(totalKills), "Exact public hiscore kills"],
+            [Crown, "Top Player", topMember?.name ?? "Loading", topMember ? `${formatNumber(topMember.totalXp)} XP` : "--"],
           ].map(([Icon, label, value, helper]) => {
             const StatIcon = Icon as typeof Users;
             return (
@@ -381,41 +355,31 @@ const Index = () => {
         <section className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
             <Panel className="p-5">
-              <SectionTitle right="RunePixels reference filters">Clans</SectionTitle>
-              <div className="mt-4 space-y-3">
-                <PillRow items={trackerTabs} />
-                <PillRow items={modeTabs} />
-                <PillRow items={periodTabs} />
-              </div>
-              <div className="mt-5 grid grid-cols-6 gap-2 sm:grid-cols-10 lg:grid-cols-[repeat(15,minmax(0,1fr))]">
-                {skillIcons.map((skill, index) => (
-                  <button
-                    key={skill}
-                    title={skill}
-                    className={`grid h-10 place-items-center rounded-xl border text-[10px] font-black transition ${
-                      index === 0
-                        ? "border-[var(--am-gold-dim)] bg-[var(--am-gold)] text-[var(--am-bg)]"
-                        : "border-[var(--am-border)] bg-[var(--am-header)] text-slate-500 hover:text-[var(--am-gold-bright)]"
-                    }`}
-                  >
-                    {skill.slice(0, 2).toUpperCase()}
-                  </button>
+              <SectionTitle right="Accurate public fields">Available Clan Values</SectionTitle>
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                {availableFields.map((field) => (
+                  <div key={field} className="rounded-2xl border border-[var(--am-border)] bg-[var(--am-header)] p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Field</p>
+                    <p className="mt-1 font-black text-slate-100">{field}</p>
+                  </div>
                 ))}
               </div>
+              <p className="mt-4 text-xs leading-5 text-slate-500">
+                I removed the fake RunePixels-style period/skill filters because the RuneScape clan endpoint does not provide
+                daily XP, weekly XP, skill breakdowns, or account modes for clan members. The table below uses exact live values.
+              </p>
             </Panel>
 
             <Panel className="p-5">
-              <SectionTitle right={`${formatNumber(members.length)} listed`}>Clan Hiscores</SectionTitle>
-              <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Today</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Total clan experience on roster: <strong className="text-emerald-400">{formatNumber(totalXp)}</strong>
-                  </p>
-                </div>
-                <PillRow items={["All", "XP", "Kills"]} />
+              <SectionTitle right={`${formatNumber(visibleMembers.length)} of ${formatNumber(memberCount)} members`}>Clan Hiscores</SectionTitle>
+              <div className="mt-4 rounded-2xl bg-[var(--am-header)] p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Roster totals</p>
+                <p className="mt-1 text-sm text-slate-400">
+                  Exact combined XP: <strong className="text-emerald-400">{formatNumber(totalXp)}</strong> · Exact tracked kills:{" "}
+                  <strong className="text-emerald-400">{formatNumber(totalKills)}</strong>
+                </p>
               </div>
-              <HiscoreTable members={sortedByXp} />
+              <HiscoreTable members={visibleMembers} />
             </Panel>
           </div>
 
@@ -459,7 +423,7 @@ const Index = () => {
             <Panel className="p-5">
               <SectionTitle right="Roster">Rank Summary</SectionTitle>
               <div className="mt-3 space-y-2">
-                {Object.entries(rankCounts).slice(0, 9).map(([rank, count]) => (
+                {rankSummary.map(([rank, count]) => (
                   <div key={rank} className="flex items-center justify-between rounded-xl bg-[var(--am-header)] px-3 py-2">
                     <span className="text-xs font-bold text-slate-300">{rank}</span>
                     <span className="font-black text-[var(--am-gold-bright)]">{count}</span>
