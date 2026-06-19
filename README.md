@@ -6,24 +6,16 @@ The project keeps the live Aussie Mob clan data work already added, but presents
 
 ## Live Preview (for N5W)
 
-This project is set up to publish a **live, clickable preview** on **GitHub Pages** automatically.
+This project is intended to run as a **live, clickable preview** on **Vercel**.
 
-To turn it on:
+Recommended Vercel settings:
 
-1. Push this project to a GitHub repository (use the `main` branch).
-2. In the repository, go to **Settings → Pages**.
-3. Under **Build and deployment → Source**, choose **GitHub Actions**.
-4. Every time you push to `main`, the site rebuilds and redeploys automatically.
+- **Framework Preset:** Vite
+- **Build Command:** `npm run build`
+- **Output Directory:** `dist`
+- **Install Command:** `npm install`
 
-Where to find the link:
-
-- Open the **Actions** tab and click the latest **Deploy live preview** run.
-- The public URL appears on the **deploy** step, and also under **Settings → Pages**.
-- It usually looks like: `https://<your-username>.github.io/<repository-name>/`
-
-Share that URL with **N5W** so the Aussie Mob home page can be viewed live in any browser, no setup required.
-
-> Tip: You can also trigger a redeploy manually from the **Actions** tab using the **Run workflow** button.
+Vercel automatically redeploys the preview whenever the connected repository is updated. Share the generated Vercel URL with **N5W** so the Aussie Mob home page can be viewed live in any browser, no setup required.
 
 ## Highlights
 
@@ -64,9 +56,6 @@ No private clan credentials or manual roster uploads are required.
 ## Project Structure
 
 ```txt
-.github/
-  workflows/
-    deploy.yml         # Auto-publishes the live preview to GitHub Pages
 public/
   assets/
     placeholder.svg    # Required local placeholder image
