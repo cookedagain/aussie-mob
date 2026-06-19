@@ -24,6 +24,7 @@ const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(
 const RUNEMETRICS_PROFILE_BASE_URL = "https://apps.runescape.com/runemetrics/profile/profile";
 const AEST_TIME_ZONE = "Australia/Brisbane";
 const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
+const PLACEHOLDER_IMAGE = `${import.meta.env.BASE_URL}assets/placeholder.svg`;
 
 const navItems = ["Home", "Members", "Progress", "Events"];
 const rankOrder = ["Owner", "Deputy Owner", "Overseer", "Coordinator", "Organiser", "Admin", "General", "Captain", "Lieutenant", "Sergeant", "Corporal", "Recruit"];
@@ -391,7 +392,7 @@ function LogoMark({ small = false }: { small?: boolean }) {
 function PlayerAvatar({ name, className = "" }: { name: string; className?: string }) {
   return (
     <div className={`relative shrink-0 overflow-hidden rounded bg-[#0b1015] ring-1 ring-[#28303a] ${className || "h-8 w-8"}`}>
-      <img src="/assets/placeholder.svg" alt="placeholder" className="h-full w-full object-cover opacity-25" />
+      <img src={PLACEHOLDER_IMAGE} alt="placeholder" className="h-full w-full object-cover opacity-25" />
       <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-[#d7a84b]">
         {name.slice(0, 2).toUpperCase()}
       </span>
@@ -407,7 +408,7 @@ function ActivityIcon({ category }: { category: ActivityTab }) {
 function EventCard({ event }: { event: (typeof events)[number] & { time: string; timer: string } }) {
   return (
     <article className="group relative min-h-[112px] overflow-hidden border border-[#2b333d] bg-[#141b23]">
-      <img src="/assets/placeholder.svg" alt="placeholder" className="absolute inset-0 h-full w-full object-cover opacity-20" />
+      <img src={PLACEHOLDER_IMAGE} alt="placeholder" className="absolute inset-0 h-full w-full object-cover opacity-20" />
       <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/70" />
       <div className="relative flex h-full min-h-[112px] flex-col justify-between p-4">
         <div>
@@ -627,7 +628,7 @@ const Index = () => {
         <div className="absolute inset-0 overflow-hidden">
           <div className="absolute inset-0 grid grid-cols-4 opacity-30">
             {[0, 1, 2, 3].map((item) => (
-              <img key={item} src="/assets/placeholder.svg" alt="placeholder" className="h-full w-full object-cover" />
+              <img key={item} src={PLACEHOLDER_IMAGE} alt="placeholder" className="h-full w-full object-cover" />
             ))}
           </div>
           <div className="absolute inset-0 bg-gradient-to-r from-[#05080b] via-[#05080b]/55 to-[#05080b]" />
