@@ -551,8 +551,8 @@ const Index = () => {
   const runeMetricsSnapshots = runeMetricsProfiles
     .map((profile) => ({ profile, member: findClanMember(profile.name, members) }))
     .sort((a, b) => (b.profile.totalxp ?? 0) - (a.profile.totalxp ?? 0));
-  const topRuneMetricsProfile = runeMetricsSnapshots[0]?.profile;
-  const topTotalLevel = topRuneMetricsProfile?.totalskill ? formatNumber(topRuneMetricsProfile.totalskill) : isFetchingRuneMetrics ? "Loading" : "--";
+  const clanTotalLevel = runeMetricsProfiles.reduce((sum, profile) => sum + (profile.totalskill ?? 0), 0);
+  const clanTotalLevelLabel = clanTotalLevel > 0 ? formatNumber(clanTotalLevel) : isFetchingRuneMetrics ? "Loading" : "--";
   const refreshedEvents = events.map((event) => {
     const nextEvent = nextAestEventDate(event.dayOfWeek, event.hour, event.minute);
     return {
@@ -651,8 +651,8 @@ const Index = () => {
             </div>
             <div>
               <Zap className="mx-auto mb-1 h-5 w-5 text-slate-500" />
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Top Total Level</p>
-              <p className="font-serif text-2xl font-black text-slate-200">{topTotalLevel}</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Clan Total Level</p>
+              <p className="font-serif text-2xl font-black text-slate-200">{clanTotalLevelLabel}</p>
             </div>
           </div>
         </div>
