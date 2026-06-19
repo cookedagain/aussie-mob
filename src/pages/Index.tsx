@@ -20,7 +20,8 @@ const CLAN_REFRESH_INTERVAL = 60_000;
 const MAX_CLAN_MEMBERS = 500;
 const RUNEMETRICS_PROFILE_LIMIT = 20;
 const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
-const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
+const RUNESTATS_CLAN_URL = `https://runestats.com/api/clan/${encodeURIComponent(CLAN_NAME)}/members_lite`;
+const CLAN_PROXY_URL = `https://corsproxy.io/?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
 const RUNEMETRICS_PROFILE_BASE_URL = "https://apps.runescape.com/runemetrics/profile/profile";
 const AEST_TIME_ZONE = "Australia/Brisbane";
 const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
@@ -140,9 +141,8 @@ function parseClanMembers(text: string): ClanMember[] {
 
 function clanDataSources(): ClanDataSource[] {
   return [
-    { label: "RuneScape", url: CLAN_HISCORES_URL },
-    { label: "CorsProxy", url: `https://corsproxy.io/?url=${encodeURIComponent(CLAN_HISCORES_URL)}` },
-    { label: "AllOrigins", url: CLAN_PROXY_URL },
+    { label: "RuneStats", url: RUNESTATS_CLAN_URL },
+    { label: "CorsProxy", url: CLAN_PROXY_URL },
   ];
 }
 
@@ -176,6 +176,24 @@ function parseAndValidateClanText(text: string) {
   return members;
 }
 
+async function fetchClanRosterFromRuneMetrics(): Promise<ClanMember[]> {
+  const profiles = await fetchRuneMetricsProfiles(fallbackMembers);
+
+  if (profiles.length === 0) {
+    throw new Error("RuneMetrics fallback returned no profiles");
+  }
+
+  return profiles.map((profile) => {
+    const seed = fallbackMembers.find((member) => member.name.toLowerCase() === profile.name.toLowerCase());
+    return {
+      name: profile.name,
+      rank: seed?.rank ?? "Recruit",
+      totalXp: profile.totalxp ?? seed?.totalXp ?? 0,
+      kills: seed?.kills ?? 0,
+    };
+  });
+}
+
 async function fetchClanData(): Promise<ClanData> {
   for (const source of clanDataSources()) {
     try {
@@ -189,7 +207,12 @@ async function fetchClanData(): Promise<ClanData> {
     }
   }
 
-  throw new Error("Unable to load the full Aussie Mob roster from RuneScape or the configured CORS proxies");
+  // Final fallback: rebuild the roster from RuneMetrics profiles.
+  return {
+    members: await fetchClanRosterFromRuneMetrics(),
+    fetchedAt: new Date().toISOString(),
+    source: "RuneMetrics",
+  };
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
