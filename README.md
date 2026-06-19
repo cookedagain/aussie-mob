@@ -4,6 +4,27 @@ A Kravy-inspired RuneScape clan home page rebuilt for **Aussie Mob** and prepare
 
 The project keeps the live Aussie Mob clan data work already added, but presents it in a darker clan-dashboard style with a top **Home** menu, hero banner, announcement block, events, activity feed, owners list, progress cards, XP gain table, boss hiscores, rank summary, and RuneMetrics details.
 
+## Live Preview (for N5W)
+
+This project is set up to publish a **live, clickable preview** on **GitHub Pages** automatically.
+
+To turn it on:
+
+1. Push this project to a GitHub repository (use the `main` branch).
+2. In the repository, go to **Settings → Pages**.
+3. Under **Build and deployment → Source**, choose **GitHub Actions**.
+4. Every time you push to `main`, the site rebuilds and redeploys automatically.
+
+Where to find the link:
+
+- Open the **Actions** tab and click the latest **Deploy live preview** run.
+- The public URL appears on the **deploy** step, and also under **Settings → Pages**.
+- It usually looks like: `https://<your-username>.github.io/<repository-name>/`
+
+Share that URL with **N5W** so the Aussie Mob home page can be viewed live in any browser, no setup required.
+
+> Tip: You can also trigger a redeploy manually from the **Actions** tab using the **Run workflow** button.
+
 ## Highlights
 
 - Kravy-style top navigation with **Home** as the active menu item
@@ -17,6 +38,7 @@ The project keeps the live Aussie Mob clan data work already added, but presents
 - Clan progress and XP gain panels
 - Boss hiscores based on public kill values
 - Rank summary and RuneMetrics profile preview
+- Live 60-second data refresh with an AEST countdown in the header
 - Responsive layout for desktop and mobile screens
 
 ## Data Sources
@@ -42,6 +64,9 @@ No private clan credentials or manual roster uploads are required.
 ## Project Structure
 
 ```txt
+.github/
+  workflows/
+    deploy.yml         # Auto-publishes the live preview to GitHub Pages
 public/
   assets/
     placeholder.svg    # Required local placeholder image
