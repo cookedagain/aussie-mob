@@ -22,7 +22,7 @@ Vercel automatically redeploys the preview whenever the connected repository is 
 - Kravy-style top navigation with **Home** as the active menu item
 - Aussie Mob branding throughout the page
 - Local placeholder images only, stored at `/public/assets/placeholder.svg`
-- Live RuneScape clan hiscores roster where browser access allows it
+- Live RuneStats clan roster where browser access allows it
 - Preview roster fallback so the design still looks complete if public feeds are blocked
 - Member search from the top bar
 - Clan activity feed generated from the current roster data
@@ -37,7 +37,7 @@ Vercel automatically redeploys the preview whenever the connected repository is 
 
 The app uses public RuneScape community data:
 
-- RuneScape clan hiscores member feed
+- RuneStats clan member data
 - RuneMetrics public player profile data
 - RunePixels profile links for player and clan navigation
 

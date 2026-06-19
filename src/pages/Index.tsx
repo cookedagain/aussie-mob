@@ -19,9 +19,8 @@ const CLAN_NAME = "Aussie Mob";
 const CLAN_REFRESH_INTERVAL = 60_000;
 const MAX_CLAN_MEMBERS = 500;
 const RUNEMETRICS_PROFILE_LIMIT = 20;
-const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
-const RUNESTATS_CLAN_URL = `https://runestats.com/api/clan/${encodeURIComponent(CLAN_NAME)}/members_lite`;
-const CLAN_PROXY_URL = `https://corsproxy.io/?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
+const RUNESTATS_CLAN_URL = `https://runestats.info/api/v1/clans/${encodeURIComponent(CLAN_NAME)}/members`;
+const RUNESTATS_PROXY_URL = `https://corsproxy.io/?url=${encodeURIComponent(RUNESTATS_CLAN_URL)}`;
 const RUNEMETRICS_PROFILE_BASE_URL = "https://apps.runescape.com/runemetrics/profile/profile";
 const AEST_TIME_ZONE = "Australia/Brisbane";
 const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
@@ -119,7 +118,7 @@ function rankOrderIndex(rank: string) {
   return index === -1 ? rankOrder.length : index;
 }
 
-function parseClanMembers(text: string): ClanMember[] {
+function parseClanMembersCsv(text: string): ClanMember[] {
   return text
     .trim()
     .split(/\r?\n/)
@@ -131,18 +130,120 @@ function parseClanMembers(text: string): ClanMember[] {
       return {
         name: name?.trim() ?? "Unknown",
         rank: rank?.trim() ?? "Recruit",
-        totalXp: Number(totalXp ?? 0),
-        kills: Number(kills ?? 0),
+        totalXp: Number((totalXp ?? "0").replace(/,/g, "")),
+        kills: Number((kills ?? "0").replace(/,/g, "")),
       };
     })
     .filter((member) => member.name !== "Unknown" && Number.isFinite(member.totalXp) && Number.isFinite(member.kills))
     .slice(0, MAX_CLAN_MEMBERS);
 }
 
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function playerNameValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return stringValue(value);
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return stringValue(record.name) ?? stringValue(record.displayName) ?? stringValue(record.display_name) ?? stringValue(record.username);
+  }
+
+  return undefined;
+}
+
+function collectMemberRows(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["members", "clanmates", "players", "data", "result", "results", "payload", "clan", "rows"]) {
+    const rows = collectMemberRows(record[key]);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+
+  return [];
+}
+
+function normalizeClanMember(row: unknown): ClanMember | null {
+  if (Array.isArray(row)) {
+    const name = stringValue(row[0]);
+    if (!name) {
+      return null;
+    }
+
+    return {
+      name,
+      rank: stringValue(row[1]) ?? "Recruit",
+      totalXp: numberValue(row[2]) ?? 0,
+      kills: numberValue(row[3]) ?? 0,
+    };
+  }
+
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+
+  const record = row as Record<string, unknown>;
+  const name = playerNameValue(record.name) ?? playerNameValue(record.player) ?? playerNameValue(record.username) ?? playerNameValue(record.rsn) ?? playerNameValue(record.clanmate);
+
+  if (!name) {
+    return null;
+  }
+
+  return {
+    name,
+    rank: stringValue(record.rank) ?? stringValue(record.clanRank) ?? stringValue(record.clan_rank) ?? "Recruit",
+    totalXp: numberValue(record.totalXp) ?? numberValue(record.totalXP) ?? numberValue(record.total_xp) ?? numberValue(record.xp) ?? numberValue(record.experience) ?? 0,
+    kills: numberValue(record.kills) ?? numberValue(record.killCount) ?? numberValue(record.bossKills) ?? numberValue(record.boss_kills) ?? 0,
+  };
+}
+
+function parseClanMembers(text: string): ClanMember[] {
+  try {
+    const rows = collectMemberRows(JSON.parse(text));
+    const members = rows
+      .map(normalizeClanMember)
+      .filter((member): member is ClanMember => Boolean(member))
+      .slice(0, MAX_CLAN_MEMBERS);
+
+    if (members.length > 0) {
+      return members;
+    }
+  } catch {
+    // RuneStats may also return CSV-compatible text depending on endpoint/proxy behavior.
+  }
+
+  return parseClanMembersCsv(text);
+}
+
 function clanDataSources(): ClanDataSource[] {
   return [
     { label: "RuneStats", url: RUNESTATS_CLAN_URL },
-    { label: "CorsProxy", url: CLAN_PROXY_URL },
+    { label: "RuneStats via CorsProxy", url: RUNESTATS_PROXY_URL },
   ];
 }
 
@@ -152,7 +253,7 @@ async function fetchText(url: string, timeoutMs = 7000) {
 
   try {
     const response = await fetch(url, {
-      headers: { Accept: "text/plain" },
+      headers: { Accept: "application/json, text/plain;q=0.9" },
       signal: controller.signal,
     });
 
@@ -568,7 +669,7 @@ const Index = () => {
   const runeMetricsRefreshAt = runeMetricsUpdatedAt ? new Date(runeMetricsUpdatedAt).toISOString() : updatedAt;
   const updateLabel = updatedAt ? formatUpdatedTime(updatedAt) : "loading live data";
   const runeMetricsUpdateLabel = runeMetricsRefreshAt ? formatUpdatedTime(runeMetricsRefreshAt) : "loading RuneMetrics";
-  const sourceLabel = hasLiveMembers ? data?.source ?? "RuneScape" : "preview roster";
+  const sourceLabel = hasLiveMembers ? data?.source ?? "RuneStats" : "preview roster";
   const runeMetricsActivities = useMemo(
     () => buildRuneMetricsActivities(runeMetricsProfiles, members, runeMetricsRefreshAt),
     [members, runeMetricsProfiles, runeMetricsRefreshAt],
@@ -597,7 +698,7 @@ const Index = () => {
   });
   const progressRows = [
     ["Roster Loaded", hasLiveMembers ? (isFullClanList ? "Full public clan cap" : "Live public roster") : "Preview roster while live feed is blocked", memberCount],
-    ["Total Public XP", "Current RuneScape clan hiscores value", totalXp],
+    ["Total Public XP", "Current RuneStats roster value", totalXp],
     ["Tracked Public Kills", "Current public boss kill value", totalKills],
   ] as const;
 
@@ -702,7 +803,7 @@ const Index = () => {
               <p className="font-serif text-[12px] font-black uppercase tracking-[0.2em] text-[#d7a84b]">Announcement</p>
               <h2 className="mt-1 text-sm font-black text-white">New Aussie Mob Look</h2>
               <p className="mt-1 text-[12px] text-slate-500">
-                Kravy-inspired home dashboard rebuilt for Aussie Mob. Clan data source: {sourceLabel}. Hiscores refreshed {updateLabel}; RuneMetrics refreshed {runeMetricsUpdateLabel}. All displayed times use AEST.
+                Kravy-inspired home dashboard rebuilt for Aussie Mob. Clan data source: {sourceLabel}. RuneStats refreshed {updateLabel}; RuneMetrics refreshed {runeMetricsUpdateLabel}. All displayed times use AEST.
               </p>
               {error && <p className="mt-2 text-[11px] text-amber-400">Live feed is currently blocked, so the preview roster is filling the layout.</p>}
             </div>
@@ -787,7 +888,7 @@ const Index = () => {
               <SectionTitle right="Live public data">Clan Progress</SectionTitle>
               <div className="space-y-4 p-4">
                 <div className="flex gap-4 text-[10px] font-black text-slate-600">
-                  <span className="text-[#d7a84b]">Current Hiscores</span>
+                  <span className="text-[#d7a84b]">Current RuneStats</span>
                   <span>AEST Updated</span>
                 </div>
                 {progressRows.map(([label, helper, value]) => (
@@ -888,8 +989,8 @@ const Index = () => {
             <a href="https://runepixels.com/clans/aussie-mob" target="_blank" rel="noreferrer" className="font-bold text-[#d7a84b] hover:text-white">
               RunePixels <ExternalLink className="inline h-3 w-3" />
             </a>
-            <a href={CLAN_HISCORES_URL} target="_blank" rel="noreferrer" className="font-bold text-[#d7a84b] hover:text-white">
-              RuneScape Hiscores <ExternalLink className="inline h-3 w-3" />
+            <a href={RUNESTATS_CLAN_URL} target="_blank" rel="noreferrer" className="font-bold text-[#d7a84b] hover:text-white">
+              RuneStats Data <ExternalLink className="inline h-3 w-3" />
             </a>
           </div>
         </footer>
