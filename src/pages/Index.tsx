@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 const CLAN_NAME = "Aussie Mob";
-const CLAN_REFRESH_INTERVAL = 300_000;
+const CLAN_REFRESH_INTERVAL = 60_000;
 const MAX_CLAN_MEMBERS = 500;
 const RUNEMETRICS_PROFILE_LIMIT = 20;
 const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
@@ -432,7 +432,7 @@ function ActivityFeed({ activities, activeTab }: { activities: ClanActivity[]; a
   if (visibleActivities.length === 0) {
     return (
       <div className="p-4 text-[12px] leading-5 text-slate-500">
-        No RuneMetrics entries are available for this filter at the current refresh. Try another tab or wait for the next 300-second refresh.
+        No RuneMetrics entries are available for this filter at the current refresh. Try another tab or wait for the next 60-second refresh.
       </div>
     );
   }
@@ -490,6 +490,12 @@ function SideMemberRow({ member, index, value }: { member: ClanMember; index?: n
 const Index = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<ActivityTab>("All");
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const { data, dataUpdatedAt, error } = useQuery({
     queryKey: ["clan-data", CLAN_NAME],
     queryFn: fetchClanData,
@@ -553,6 +559,10 @@ const Index = () => {
     .sort((a, b) => (b.profile.totalxp ?? 0) - (a.profile.totalxp ?? 0));
   const clanTotalLevel = runeMetricsProfiles.reduce((sum, profile) => sum + (profile.totalskill ?? 0), 0);
   const clanTotalLevelLabel = clanTotalLevel > 0 ? formatNumber(clanTotalLevel) : isFetchingRuneMetrics ? "Loading" : "--";
+  const lastRefreshAt = Math.max(dataUpdatedAt || 0, runeMetricsUpdatedAt || 0);
+  const secondsUntilRefresh = lastRefreshAt
+    ? Math.max(0, Math.ceil((lastRefreshAt + CLAN_REFRESH_INTERVAL - now) / 1000))
+    : Math.ceil(CLAN_REFRESH_INTERVAL / 1000);
   const refreshedEvents = events.map((event) => {
     const nextEvent = nextAestEventDate(event.dayOfWeek, event.hour, event.minute);
     return {
@@ -591,8 +601,11 @@ const Index = () => {
           </nav>
 
           <div className="flex items-center gap-2">
-            <span className="hidden border border-[#252d36] bg-[#05080b] px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-slate-500 sm:inline-flex">
+            <span className="hidden items-center gap-2 border border-[#252d36] bg-[#05080b] px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-slate-500 sm:inline-flex">
               Times in AEST
+              <span className="rounded bg-[#14100a] px-1.5 py-0.5 text-[#d7a84b] tabular-nums">
+                {secondsUntilRefresh}s
+              </span>
             </span>
             <label className="hidden h-6 items-center border border-[#252d36] bg-[#05080b] px-2 lg:flex">
               <input
