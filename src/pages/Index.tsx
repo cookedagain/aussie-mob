@@ -18,7 +18,7 @@ import {
 const CLAN_NAME = "Aussie Mob";
 const CLAN_REFRESH_INTERVAL = 300_000;
 const MAX_CLAN_MEMBERS = 500;
-const RUNEMETRICS_PROFILE_LIMIT = 8;
+const RUNEMETRICS_PROFILE_LIMIT = 20;
 const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
 const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
 const RUNEMETRICS_PROFILE_BASE_URL = "https://apps.runescape.com/runemetrics/profile/profile";
@@ -70,7 +70,11 @@ type ClanActivity = {
   member: ClanMember;
   category: ActivityTab;
   message: string;
+  dateLabel: string;
   time: string;
+  totalXp?: number;
+  totalLevel?: number;
+  combatLevel?: number;
 };
 
 const fallbackMembers: ClanMember[] = [
@@ -296,26 +300,66 @@ function playerSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function buildActivities(members: ClanMember[]): ClanActivity[] {
-  const messages = [
-    { category: "Boss Kills" as const, text: "I killed Zamorak, Lord of Chaos." },
-    { category: "Boss Loot" as const, text: "I found a rare clan loot drop." },
-    { category: "Skills" as const, text: "Levelled up and added fresh XP to the clan total." },
-    { category: "Quests" as const, text: "Completed a quest milestone." },
-    { category: "Citadel" as const, text: "Contributed resources at the clan citadel." },
-    { category: "Clue Scrolls" as const, text: "Completed an elite clue scroll." },
-    { category: "Pets" as const, text: "Added another pet roll to the collection." },
-  ];
+function findClanMember(profileName: string, members: ClanMember[]) {
+  return members.find((member) => member.name.toLowerCase() === profileName.toLowerCase()) ?? {
+    name: profileName,
+    rank: "RuneMetrics",
+    totalXp: 0,
+    kills: 0,
+  };
+}
 
-  return members.slice(0, 32).map((member, index) => {
-    const template = messages[index % messages.length];
-    return {
-      member,
-      category: template.category,
-      message: member.kills > 0 && template.category === "Boss Kills" ? `I added ${formatNumber(member.kills)} public boss kills.` : template.text,
-      time: index < 2 ? "just now" : `${Math.max(1, Math.floor(index / 2))} hours ago`,
-    };
-  });
+function runeMetricsCategory(activity: RuneMetricsActivity): ActivityTab {
+  const text = `${activity.text ?? ""} ${activity.details ?? ""}`.toLowerCase();
+
+  if (text.includes("pet")) {
+    return "Pets";
+  }
+
+  if (text.includes("clue")) {
+    return "Clue Scrolls";
+  }
+
+  if (text.includes("quest")) {
+    return "Quests";
+  }
+
+  if (text.includes("level") || text.includes("xp") || text.includes("experience")) {
+    return "Skills";
+  }
+
+  if (text.includes("kill") || text.includes("defeat")) {
+    return "Boss Kills";
+  }
+
+  if (text.includes("drop") || text.includes("loot") || text.includes("found") || text.includes("received") || text.includes("obtained")) {
+    return "Boss Loot";
+  }
+
+  return "All";
+}
+
+function buildRuneMetricsActivities(profiles: RuneMetricsProfile[], members: ClanMember[], refreshedAt?: string): ClanActivity[] {
+  const refreshDate = refreshedAt ?? new Date().toISOString();
+  const dateLabel = formatAestDate(refreshDate);
+  const time = `${formatUpdatedTime(refreshDate)} refresh`;
+
+  return profiles
+    .flatMap((profile) => {
+      const member = findClanMember(profile.name, members);
+      return (profile.activities ?? []).map((activity) => ({
+        member,
+        category: runeMetricsCategory(activity),
+        message: activity.text || activity.details || "RuneMetrics activity recorded.",
+        dateLabel,
+        time,
+        totalXp: profile.totalxp,
+        totalLevel: profile.totalskill,
+        combatLevel: profile.combatlevel,
+      }));
+    })
+    .filter((activity) => activity.category !== "All")
+    .slice(0, 60);
 }
 
 function Panel({ children, className = "", id }: { children: ReactNode; className?: string; id?: string }) {
@@ -382,8 +426,16 @@ function EventCard({ event }: { event: (typeof events)[number] & { time: string;
   );
 }
 
-function ActivityFeed({ activities, activeTab, dateLabel }: { activities: ClanActivity[]; activeTab: ActivityTab; dateLabel: string }) {
+function ActivityFeed({ activities, activeTab }: { activities: ClanActivity[]; activeTab: ActivityTab }) {
   const visibleActivities = activeTab === "All" ? activities : activities.filter((activity) => activity.category === activeTab);
+
+  if (visibleActivities.length === 0) {
+    return (
+      <div className="p-4 text-[12px] leading-5 text-slate-500">
+        No RuneMetrics entries are available for this filter at the current refresh. Try another tab or wait for the next 300-second refresh.
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-x-8 gap-y-1 p-4 lg:grid-cols-2">
@@ -399,12 +451,15 @@ function ActivityFeed({ activities, activeTab, dateLabel }: { activities: ClanAc
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <p className="truncate text-[12px] font-black text-slate-200">{activity.member.name}</p>
-              <span className="text-[10px] text-slate-600">{dateLabel} AEST</span>
+              <span className="text-[10px] text-slate-600">{activity.dateLabel} AEST</span>
             </div>
             <div className="mt-1 flex items-center gap-2">
               <ActivityIcon category={activity.category} />
               <p className="truncate text-[11px] text-slate-400">{activity.message}</p>
             </div>
+            <p className="mt-1 truncate text-[10px] text-slate-600">
+              At refresh: combat {activity.combatLevel ?? "--"} · total {activity.totalLevel ?? "--"} · XP {activity.totalXp ? formatCompactNumber(activity.totalXp) : "--"}
+            </p>
           </div>
           <span className="whitespace-nowrap pt-5 text-[10px] text-slate-600">{activity.time}</span>
         </a>
@@ -435,7 +490,7 @@ function SideMemberRow({ member, index, value }: { member: ClanMember; index?: n
 const Index = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<ActivityTab>("All");
-  const { data, dataUpdatedAt, error, isFetching } = useQuery({
+  const { data, dataUpdatedAt, error } = useQuery({
     queryKey: ["clan-data", CLAN_NAME],
     queryFn: fetchClanData,
     refetchInterval: CLAN_REFRESH_INTERVAL,
@@ -450,11 +505,11 @@ const Index = () => {
   const totalXp = members.reduce((sum, member) => sum + member.totalXp, 0);
   const totalKills = members.reduce((sum, member) => sum + member.kills, 0);
   const sortedByXp = [...members].sort((a, b) => b.totalXp - a.totalXp);
-  const sortedByKills = [...members].sort((a, b) => b.kills - a.kills || b.totalXp - a.totalXp);
   const runeMetricsTargets = sortedByXp.slice(0, RUNEMETRICS_PROFILE_LIMIT);
   const runeMetricsNames = runeMetricsTargets.map((member) => member.name).join("|");
   const {
     data: runeMetricsProfiles = [],
+    dataUpdatedAt: runeMetricsUpdatedAt,
     error: runeMetricsError,
     isFetching: isFetchingRuneMetrics,
   } = useQuery({
@@ -479,12 +534,25 @@ const Index = () => {
   const rankSummary = Object.entries(rankCounts).sort(
     ([rankA], [rankB]) => rankOrderIndex(rankA) - rankOrderIndex(rankB),
   );
-  const activities = useMemo(() => buildActivities(visibleMembers.length > 0 ? visibleMembers : members), [members, visibleMembers]);
   const updatedAt = dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : data?.fetchedAt;
+  const runeMetricsRefreshAt = runeMetricsUpdatedAt ? new Date(runeMetricsUpdatedAt).toISOString() : updatedAt;
   const updateLabel = updatedAt ? formatUpdatedTime(updatedAt) : "loading live data";
-  const activityDateLabel = formatAestDate(updatedAt ?? new Date());
+  const runeMetricsUpdateLabel = runeMetricsRefreshAt ? formatUpdatedTime(runeMetricsRefreshAt) : "loading RuneMetrics";
   const sourceLabel = hasLiveMembers ? data?.source ?? "RuneScape" : "preview roster";
-  const topTotalLevel = runeMetricsProfiles[0]?.totalskill ? formatNumber(runeMetricsProfiles[0].totalskill) : isFetchingRuneMetrics ? "Loading" : "--";
+  const runeMetricsActivities = useMemo(
+    () => buildRuneMetricsActivities(runeMetricsProfiles, members, runeMetricsRefreshAt),
+    [members, runeMetricsProfiles, runeMetricsRefreshAt],
+  );
+  const activities = runeMetricsActivities.filter((activity) =>
+    `${activity.member.name} ${activity.message}`.toLowerCase().includes(searchTerm.trim().toLowerCase()),
+  );
+  const bossKillActivities = runeMetricsActivities.filter((activity) => activity.category === "Boss Kills");
+  const lootDropActivities = runeMetricsActivities.filter((activity) => activity.category === "Boss Loot");
+  const runeMetricsSnapshots = runeMetricsProfiles
+    .map((profile) => ({ profile, member: findClanMember(profile.name, members) }))
+    .sort((a, b) => (b.profile.totalxp ?? 0) - (a.profile.totalxp ?? 0));
+  const topRuneMetricsProfile = runeMetricsSnapshots[0]?.profile;
+  const topTotalLevel = topRuneMetricsProfile?.totalskill ? formatNumber(topRuneMetricsProfile.totalskill) : isFetchingRuneMetrics ? "Loading" : "--";
   const refreshedEvents = events.map((event) => {
     const nextEvent = nextAestEventDate(event.dayOfWeek, event.hour, event.minute);
     return {
@@ -597,7 +665,7 @@ const Index = () => {
               <p className="font-serif text-[12px] font-black uppercase tracking-[0.2em] text-[#d7a84b]">Announcement</p>
               <h2 className="mt-1 text-sm font-black text-white">New Aussie Mob Look</h2>
               <p className="mt-1 text-[12px] text-slate-500">
-                Kravy-inspired home dashboard rebuilt for Aussie Mob. Data source: {sourceLabel}. Last update: {updateLabel}. All displayed times use AEST.
+                Kravy-inspired home dashboard rebuilt for Aussie Mob. Clan data source: {sourceLabel}. Hiscores refreshed {updateLabel}; RuneMetrics refreshed {runeMetricsUpdateLabel}. All displayed times use AEST.
               </p>
               {error && <p className="mt-2 text-[11px] text-amber-400">Live feed is currently blocked, so the preview roster is filling the layout.</p>}
             </div>
@@ -623,7 +691,7 @@ const Index = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h2 className="font-serif text-[13px] font-black uppercase tracking-[0.18em] text-[#d7a84b]">Clan Activity</h2>
                   <span className="text-[11px] font-semibold text-slate-500">
-                    {isFetching ? "Refreshing" : `${formatNumber(visibleMembers.length)} members shown`}
+                    {isFetchingRuneMetrics ? "Refreshing RuneMetrics" : `${formatNumber(activities.length)} RuneMetrics entries`}
                   </span>
                 </div>
                 <div className="mt-3 flex gap-3 overflow-x-auto pb-2">
@@ -638,7 +706,7 @@ const Index = () => {
                   ))}
                 </div>
               </div>
-              <ActivityFeed activities={activities} activeTab={activeTab} dateLabel={activityDateLabel} />
+              <ActivityFeed activities={activities} activeTab={activeTab} />
               <div className="flex justify-center gap-1 border-t border-[#252d36] p-4 text-[11px]">
                 {[1, 2, 3, 4, 5].map((page) => (
                   <button key={page} className={`h-7 w-7 border border-[#252d36] ${page === 1 ? "bg-[#4c3411] text-[#d7a84b]" : "text-slate-600 hover:text-white"}`}>
@@ -711,11 +779,36 @@ const Index = () => {
             </Panel>
 
             <Panel>
-              <SectionTitle right="Kills">Boss Hiscores</SectionTitle>
-              <div>
-                {sortedByKills.slice(0, 8).map((member, index) => (
-                  <SideMemberRow key={`${member.name}-kills`} member={member} index={index + 1} value={formatNumber(member.kills)} />
-                ))}
+              <SectionTitle right={`${bossKillActivities.length} entries`}>RuneMetrics Boss Kills</SectionTitle>
+              <div className="p-3">
+                {bossKillActivities.length > 0 ? (
+                  bossKillActivities.slice(0, 8).map((activity, index) => (
+                    <div key={`${activity.member.name}-boss-${index}`} className="border-b border-[#202831] py-2 last:border-0">
+                      <p className="text-[11px] font-black text-slate-300">{activity.member.name}</p>
+                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{activity.message}</p>
+                      <p className="mt-1 text-[10px] text-slate-600">Total {activity.totalLevel ?? "--"} · XP {activity.totalXp ? formatCompactNumber(activity.totalXp) : "--"}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-[11px] leading-5 text-slate-500">No RuneMetrics boss kill entries were returned at this refresh.</p>
+                )}
+              </div>
+            </Panel>
+
+            <Panel>
+              <SectionTitle right={`${lootDropActivities.length} entries`}>RuneMetrics Loot Drops</SectionTitle>
+              <div className="p-3">
+                {lootDropActivities.length > 0 ? (
+                  lootDropActivities.slice(0, 8).map((activity, index) => (
+                    <div key={`${activity.member.name}-loot-${index}`} className="border-b border-[#202831] py-2 last:border-0">
+                      <p className="text-[11px] font-black text-slate-300">{activity.member.name}</p>
+                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{activity.message}</p>
+                      <p className="mt-1 text-[10px] text-slate-600">Total {activity.totalLevel ?? "--"} · XP {activity.totalXp ? formatCompactNumber(activity.totalXp) : "--"}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-[11px] leading-5 text-slate-500">No RuneMetrics loot drop entries were returned at this refresh.</p>
+                )}
               </div>
             </Panel>
 
@@ -732,18 +825,21 @@ const Index = () => {
             </Panel>
 
             <Panel>
-              <SectionTitle right={`${runeMetricsProfiles.length}/${RUNEMETRICS_PROFILE_LIMIT}`}>RuneMetrics</SectionTitle>
+              <SectionTitle right={runeMetricsUpdateLabel}>RuneMetrics Snapshots</SectionTitle>
               <div className="p-3 text-[11px] leading-5 text-slate-500">
-                {runeMetricsProfiles.length > 0
-                  ? runeMetricsProfiles.slice(0, 3).map((profile) => (
+                {runeMetricsSnapshots.length > 0
+                  ? runeMetricsSnapshots.slice(0, 5).map(({ profile, member }) => (
                       <div key={profile.name} className="border-b border-[#202831] py-2 last:border-0">
                         <p className="font-black text-slate-300">{profile.name}</p>
-                        <p>Combat {profile.combatlevel ?? "--"} · Total {profile.totalskill ?? "--"} · Quests {profile.questscomplete ?? "--"}</p>
+                        <p>
+                          Rank {member.rank} · Combat {profile.combatlevel ?? "--"} · Total Level {profile.totalskill ?? "--"}
+                        </p>
+                        <p>XP at refresh: {profile.totalxp ? formatNumber(profile.totalxp) : "--"}</p>
                       </div>
                     ))
                   : runeMetricsError
                     ? "RuneMetrics profiles could not be reached right now."
-                    : "Loading RuneMetrics details for the top XP members..."}
+                    : "Loading RuneMetrics level and XP snapshots..."}
               </div>
             </Panel>
           </aside>
