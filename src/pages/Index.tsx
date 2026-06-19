@@ -22,6 +22,8 @@ const RUNEMETRICS_PROFILE_LIMIT = 8;
 const CLAN_HISCORES_URL = `https://secure.runescape.com/m=clan-hiscores/members_lite.ws?clanName=${encodeURIComponent(CLAN_NAME)}`;
 const CLAN_PROXY_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(CLAN_HISCORES_URL)}`;
 const RUNEMETRICS_PROFILE_BASE_URL = "https://apps.runescape.com/runemetrics/profile/profile";
+const AEST_TIME_ZONE = "Australia/Brisbane";
+const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
 
 const navItems = ["Home", "Members", "Progress", "Events"];
 const rankOrder = ["Owner", "Deputy Owner", "Overseer", "Coordinator", "Organiser", "Admin", "General", "Captain", "Lieutenant", "Sergeant", "Corporal", "Recruit"];
@@ -92,14 +94,16 @@ const fallbackMembers: ClanMember[] = [
 const events = [
   {
     title: "Aussie Mob Boss Night",
-    time: "07:30 PM",
-    timer: "16h 56m",
+    dayOfWeek: 5,
+    hour: 19,
+    minute: 30,
     description: "Clan PvM session for anyone wanting kills, loot splits, and a relaxed voice-chat run.",
   },
   {
     title: "Weekly Skill & Chill",
-    time: "09:00 PM",
-    timer: "19h 56m",
+    dayOfWeek: 0,
+    hour: 21,
+    minute: 0,
     description: "A social skilling block for clan XP gains, citadel support, and helping newer members progress.",
   },
 ];
@@ -229,8 +233,63 @@ function formatUpdatedTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    timeZone: AEST_TIME_ZONE,
     timeZoneName: "short",
   }).format(new Date(value));
+}
+
+function formatAestDate(value: Date | string) {
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: AEST_TIME_ZONE,
+  }).format(new Date(value));
+}
+
+function formatAestEventTime(value: Date) {
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: AEST_TIME_ZONE,
+    timeZoneName: "short",
+  }).format(value);
+}
+
+function nextAestEventDate(dayOfWeek: number, hour: number, minute: number, now = new Date()) {
+  const aestNow = new Date(now.getTime() + AEST_OFFSET_MS);
+  const daysUntilEvent = (dayOfWeek - aestNow.getUTCDay() + 7) % 7;
+  let eventUtc = Date.UTC(
+    aestNow.getUTCFullYear(),
+    aestNow.getUTCMonth(),
+    aestNow.getUTCDate() + daysUntilEvent,
+    hour - 10,
+    minute,
+  );
+
+  if (eventUtc <= now.getTime()) {
+    eventUtc += 7 * 24 * 60 * 60 * 1000;
+  }
+
+  return new Date(eventUtc);
+}
+
+function formatDurationUntil(value: Date, now = new Date()) {
+  const totalMinutes = Math.max(0, Math.round((value.getTime() - now.getTime()) / 60_000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
 }
 
 function playerSlug(name: string) {
@@ -301,7 +360,7 @@ function ActivityIcon({ category }: { category: ActivityTab }) {
   return <div className="grid h-6 w-6 shrink-0 place-items-center rounded bg-[#1a211b] text-[#d7a84b] ring-1 ring-[#3b3320]">{icon}</div>;
 }
 
-function EventCard({ event }: { event: (typeof events)[number] }) {
+function EventCard({ event }: { event: (typeof events)[number] & { time: string; timer: string } }) {
   return (
     <article className="group relative min-h-[112px] overflow-hidden border border-[#2b333d] bg-[#141b23]">
       <img src="/assets/placeholder.svg" alt="placeholder" className="absolute inset-0 h-full w-full object-cover opacity-20" />
@@ -323,7 +382,7 @@ function EventCard({ event }: { event: (typeof events)[number] }) {
   );
 }
 
-function ActivityFeed({ activities, activeTab }: { activities: ClanActivity[]; activeTab: ActivityTab }) {
+function ActivityFeed({ activities, activeTab, dateLabel }: { activities: ClanActivity[]; activeTab: ActivityTab; dateLabel: string }) {
   const visibleActivities = activeTab === "All" ? activities : activities.filter((activity) => activity.category === activeTab);
 
   return (
@@ -340,7 +399,7 @@ function ActivityFeed({ activities, activeTab }: { activities: ClanActivity[]; a
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <p className="truncate text-[12px] font-black text-slate-200">{activity.member.name}</p>
-              <span className="text-[10px] text-slate-600">19/06/2026</span>
+              <span className="text-[10px] text-slate-600">{dateLabel} AEST</span>
             </div>
             <div className="mt-1 flex items-center gap-2">
               <ActivityIcon category={activity.category} />
@@ -386,7 +445,7 @@ const Index = () => {
 
   const hasLiveMembers = Boolean(data?.members.length);
   const members = (hasLiveMembers ? data!.members : fallbackMembers).slice(0, MAX_CLAN_MEMBERS);
-  const memberCount = hasLiveMembers ? members.length : MAX_CLAN_MEMBERS;
+  const memberCount = members.length;
   const isFullClanList = hasLiveMembers && memberCount >= MAX_CLAN_MEMBERS;
   const totalXp = members.reduce((sum, member) => sum + member.totalXp, 0);
   const totalKills = members.reduce((sum, member) => sum + member.kills, 0);
@@ -423,11 +482,22 @@ const Index = () => {
   const activities = useMemo(() => buildActivities(visibleMembers.length > 0 ? visibleMembers : members), [members, visibleMembers]);
   const updatedAt = dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : data?.fetchedAt;
   const updateLabel = updatedAt ? formatUpdatedTime(updatedAt) : "loading live data";
+  const activityDateLabel = formatAestDate(updatedAt ?? new Date());
   const sourceLabel = hasLiveMembers ? data?.source ?? "RuneScape" : "preview roster";
-  const topTotalLevel = runeMetricsProfiles[0]?.totalskill ? formatNumber(runeMetricsProfiles[0].totalskill) : "3,168";
-  const progressToday = Math.max(28_300_000, Math.round(totalXp * 0.001));
-  const progressWeek = Math.max(893_000_000, Math.round(totalXp * 0.015));
-  const progressMonth = Math.max(4_500_000_000, Math.round(totalXp * 0.075));
+  const topTotalLevel = runeMetricsProfiles[0]?.totalskill ? formatNumber(runeMetricsProfiles[0].totalskill) : isFetchingRuneMetrics ? "Loading" : "--";
+  const refreshedEvents = events.map((event) => {
+    const nextEvent = nextAestEventDate(event.dayOfWeek, event.hour, event.minute);
+    return {
+      ...event,
+      time: formatAestEventTime(nextEvent),
+      timer: formatDurationUntil(nextEvent),
+    };
+  });
+  const progressRows = [
+    ["Roster Loaded", hasLiveMembers ? (isFullClanList ? "Full public clan cap" : "Live public roster") : "Preview roster while live feed is blocked", memberCount],
+    ["Total Public XP", "Current RuneScape clan hiscores value", totalXp],
+    ["Tracked Public Kills", "Current public boss kill value", totalKills],
+  ] as const;
 
   return (
     <main className="min-h-screen bg-[#05080b] text-slate-300 selection:bg-[#d7a84b] selection:text-black">
@@ -453,6 +523,9 @@ const Index = () => {
           </nav>
 
           <div className="flex items-center gap-2">
+            <span className="hidden border border-[#252d36] bg-[#05080b] px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-slate-500 sm:inline-flex">
+              Times in AEST
+            </span>
             <label className="hidden h-6 items-center border border-[#252d36] bg-[#05080b] px-2 lg:flex">
               <input
                 value={searchTerm}
@@ -505,12 +578,12 @@ const Index = () => {
             </div>
             <div>
               <Shield className="mx-auto mb-1 h-5 w-5 text-slate-500" />
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Citadel Tier</p>
-              <p className="font-serif text-2xl font-black text-slate-200">7</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Roster Cap</p>
+              <p className="font-serif text-2xl font-black text-slate-200">{MAX_CLAN_MEMBERS}</p>
             </div>
             <div>
               <Zap className="mx-auto mb-1 h-5 w-5 text-slate-500" />
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Total Level</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Top Total Level</p>
               <p className="font-serif text-2xl font-black text-slate-200">{topTotalLevel}</p>
             </div>
           </div>
@@ -524,7 +597,7 @@ const Index = () => {
               <p className="font-serif text-[12px] font-black uppercase tracking-[0.2em] text-[#d7a84b]">Announcement</p>
               <h2 className="mt-1 text-sm font-black text-white">New Aussie Mob Look</h2>
               <p className="mt-1 text-[12px] text-slate-500">
-                Kravy-inspired home dashboard rebuilt for Aussie Mob. Data source: {sourceLabel}. Last update: {updateLabel}.
+                Kravy-inspired home dashboard rebuilt for Aussie Mob. Data source: {sourceLabel}. Last update: {updateLabel}. All displayed times use AEST.
               </p>
               {error && <p className="mt-2 text-[11px] text-amber-400">Live feed is currently blocked, so the preview roster is filling the layout.</p>}
             </div>
@@ -537,9 +610,9 @@ const Index = () => {
         <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
           <div className="space-y-4">
             <Panel id="events">
-              <SectionTitle right="Show All (10)">Upcoming Events</SectionTitle>
+              <SectionTitle right="AEST schedule">Upcoming Events</SectionTitle>
               <div className="grid gap-3 p-4 md:grid-cols-2">
-                {events.map((event) => (
+                {refreshedEvents.map((event) => (
                   <EventCard key={event.title} event={event} />
                 ))}
               </div>
@@ -565,7 +638,7 @@ const Index = () => {
                   ))}
                 </div>
               </div>
-              <ActivityFeed activities={activities} activeTab={activeTab} />
+              <ActivityFeed activities={activities} activeTab={activeTab} dateLabel={activityDateLabel} />
               <div className="flex justify-center gap-1 border-t border-[#252d36] p-4 text-[11px]">
                 {[1, 2, 3, 4, 5].map((page) => (
                   <button key={page} className={`h-7 w-7 border border-[#252d36] ${page === 1 ? "bg-[#4c3411] text-[#d7a84b]" : "text-slate-600 hover:text-white"}`}>
@@ -606,38 +679,33 @@ const Index = () => {
             </Panel>
 
             <Panel id="progress">
-              <SectionTitle>Clan Progress</SectionTitle>
+              <SectionTitle right="Live public data">Clan Progress</SectionTitle>
               <div className="space-y-4 p-4">
                 <div className="flex gap-4 text-[10px] font-black text-slate-600">
-                  <span className="text-[#d7a84b]">Total XP Gain</span>
-                  <span>Boss Kills</span>
+                  <span className="text-[#d7a84b]">Current Hiscores</span>
+                  <span>AEST Updated</span>
                 </div>
-                {[
-                  ["Today", "Resets in 21h 56m", progressToday],
-                  ["This Week", "Resets in 3d 21h", progressWeek],
-                  ["This Month", "Resets in 11d 21h", progressMonth],
-                ].map(([label, reset, value]) => (
-                  <div key={String(label)} className="flex items-end justify-between border-b border-[#202831] pb-3 last:border-0 last:pb-0">
+                {progressRows.map(([label, helper, value]) => (
+                  <div key={label} className="flex items-end justify-between border-b border-[#202831] pb-3 last:border-0 last:pb-0">
                     <div>
-                      <p className="text-[11px] font-black text-slate-200">{String(label)}</p>
-                      <p className="mt-1 text-[10px] text-slate-600">{String(reset)}</p>
+                      <p className="text-[11px] font-black text-slate-200">{label}</p>
+                      <p className="mt-1 text-[10px] text-slate-600">{helper}</p>
                     </div>
-                    <p className="font-serif text-lg font-black text-emerald-400">{formatCompactNumber(Number(value))}</p>
+                    <p className="font-serif text-lg font-black text-emerald-400">{formatCompactNumber(value)}</p>
                   </div>
                 ))}
               </div>
             </Panel>
 
             <Panel>
-              <SectionTitle right={isFetchingRuneMetrics ? "Refreshing" : "Daily"}>XP Gain</SectionTitle>
+              <SectionTitle right="Current">Top Total XP</SectionTitle>
               <div className="flex gap-4 border-b border-[#202831] px-4 py-2 text-[10px] font-black text-slate-600">
-                <span className="text-[#d7a84b]">Daily</span>
-                <span>Weekly</span>
-                <span>Monthly</span>
+                <span className="text-[#d7a84b]">Total XP</span>
+                <span>Live roster</span>
               </div>
               <div>
                 {sortedByXp.slice(0, 15).map((member, index) => (
-                  <SideMemberRow key={`${member.name}-xp`} member={member} index={index + 1} value={formatCompactNumber(Math.max(639_300, Math.round(member.totalXp * 0.001)))} />
+                  <SideMemberRow key={`${member.name}-xp`} member={member} index={index + 1} value={formatCompactNumber(member.totalXp)} />
                 ))}
               </div>
             </Panel>
